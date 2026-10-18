@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cryptolike"
+version = "0.1.0"
+description = "Official server-side SDK for the CryptoLike merchant API: signed requests, automatic Idempotency-Key, retries with backoff, typed resources and webhook verification."
+readme = "README.md"
+license = "MIT"  # SPDX (PEP 639)
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "CryptoLike team" }]
+keywords = ["cryptolike", "crypto", "cryptocurrency", "crypto payments", "payment gateway", "payments", "bitcoin", "usdt", "invoices", "webhooks", "hmac", "api client", "sdk"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Office/Business :: Financial",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Typing :: Typed",
+]
+dependencies = ["requests>=2.33.0", "urllib3>=2.8.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/Cryptolike-net/cryptolike-python"
+Documentation = "https://cryptolike.net/docs/sdk"
+Repository = "https://github.com/Cryptolike-net/cryptolike-python"
+Issues = "https://github.com/Cryptolike-net/cryptolike-python/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cryptolike = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
