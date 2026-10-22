@@ -14,6 +14,7 @@ from .client import Client
 from .errors import WITHDRAW_PENDING_APPROVAL, ApiError, CryptoLikeError, NetworkError, WebhookVerificationError
 from .types import (
     Balance,
+    CoinOption,
     Currency,
     EmbedSettings,
     Invoice,
@@ -63,6 +64,7 @@ __all__ = [
     "canonical_string",
     "body_sha256",
     "Balance",
+    "CoinOption",
     "Currency",
     "EmbedSettings",
     "Invoice",

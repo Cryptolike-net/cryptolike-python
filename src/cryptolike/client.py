@@ -12,7 +12,7 @@ import random
 import time
 import uuid
 from decimal import Decimal
-from typing import Any, Callable, Iterator, Mapping, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Iterator, List, Mapping, Optional, Sequence, TypeVar, Union
 from urllib.parse import quote, urlencode
 
 import requests
@@ -22,6 +22,7 @@ from .auth import sign
 from .errors import ApiError, NetworkError
 from .types import (
     Balance,
+    CoinOption,
     Currency,
     EmbedSettings,
     Invoice,
@@ -389,6 +390,26 @@ class Invoices(_Resource):
     def export_csv(self, **filters: Any) -> str:
         """The whole filtered list as CSV text."""
         return self._c.request("GET", "/v1/invoices", query={**_filters(filters), "format": "csv"}, raw=True)
+
+    def coin_options(self, invoice_id: str) -> List[CoinOption]:  # typing.List: `list` is a method of this class
+        """Coins the payer may choose for an invoice created without ``coin_id`` — the list of the payment page,
+        each with an informative ``≈`` ``estimated_amount``. Show it in your own UI and fix the choice with
+        ``select_coin``. ``409 conflict`` (``details["coin_id"]``) once the coin is chosen. Permission ``read``."""
+        out = self._c.request("GET", f"/v1/invoices/{_path(invoice_id)}/coin-options")
+        return [CoinOption.from_dict(o) for o in out.get("coin_options") or []]
+
+    def select_coin(self, invoice_id: str, coin_id: str, *, idempotency_key: Optional[str] = None) -> Invoice:
+        """Fix the coin of an invoice created without ``coin_id`` — the same choice as the payer's on the payment
+        page: allocates the address, prices a fiat amount now and locks the rate. Returns the invoice with
+        ``address``, ``payer_amount``, ``payment_uri``, ``qr_payload`` and ``required_confirmations``.
+
+        Only once and only while the invoice is ``new`` (otherwise ``409``, also with the same coin); a coin
+        outside ``coin_options`` is ``400`` (``field == "coin_id"``); ``503`` (rate or address not available
+        right now) is retried with the same ``idempotency_key``, which defaults to a random UUID.
+        Permission ``create_invoice``.
+        """
+        body = {"coin_id": coin_id}
+        return Invoice.from_dict(self._c.request("POST", f"/v1/invoices/{_path(invoice_id)}/coin", body=body, idempotency_key=idempotency_key))
 
 
 class Addresses(_Resource):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cryptolike"
-version = "0.1.0"
+version = "0.2.0"
 description = "Official server-side SDK for the CryptoLike merchant API: signed requests, automatic Idempotency-Key, retries with backoff, typed resources and webhook verification."
 readme = "README.md"
 license = "MIT"  # SPDX (PEP 639)

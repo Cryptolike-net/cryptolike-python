@@ -138,12 +138,44 @@ class Invoice(Model):
     expired_at: Optional[str] = None
     created_at: str = ""
     updated_at: str = ""
+    payment_uri: Optional[str] = None
+    """Wallet link for the payer (BIP-21 / EIP-681 / ``tron:``) asking for what is still owed; ``None`` until the coin is chosen."""
+    qr_payload: Optional[str] = None
+    """What to encode in the payment QR code — the bare deposit address on every network (no URI scheme, no
+    amount: exchange withdrawal forms accept an address only); show the amount next to it. For an opt-in
+    "QR with amount" for wallets (Bitcoin/Litecoin) encode ``payment_uri``. ``None`` until the coin is chosen."""
+    confirmations: Optional[int] = None
+    """Confirmations of the least-confirmed transfer on the chain now; ``None`` until the coin is chosen or while nothing was seen."""
+    required_confirmations: Optional[int] = None
+    """Confirmations the coin needs before a transfer is credited; ``None`` until the coin is chosen."""
     events: list[InvoiceEvent] = field(default_factory=list)
     """Status timeline — only on ``invoices.get``."""
 
     @property
     def is_final(self) -> bool:
         return self.status in ("paid", "expired", "cancelled")
+
+
+@dataclass
+class CoinOption(Model):
+    """One coin the payer may choose for an invoice without a coin (``invoices.coin_options``)."""
+
+    coin_id: str = ""
+    ticker: str = ""
+    name: str = ""
+    network: str = ""
+    network_name: str = ""
+    decimals: int = 0
+    confirmations: int = 0
+    estimated_amount: Optional[Decimal] = None
+    """Informative ``≈`` amount in the coin if chosen now; the choice prices again and locks its rate.
+    ``None`` when it cannot be priced now (``estimate_reason``) — the coin can still be chosen."""
+    estimate_reason: Optional[str] = None
+    """``rate_stale`` | ``rate_unavailable`` | ``below_min`` | ``above_max`` | ``converts_to_zero`` | ``too_many_decimals``."""
+    estimate_message: Optional[dict[str, Any]] = None
+    """UI text for a missing estimate (``key``, ``default``, ``params``); ``None`` with an estimate."""
+    rate_as_of: Optional[str] = None
+    """When the rate behind ``estimated_amount`` was quoted (fiat amounts only)."""
 
 
 # ---- static addresses ------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from cryptolike import (
     WITHDRAW_PENDING_APPROVAL,
     ApiError,
     Client,
+    CoinOption,
     Invoice,
     NetworkError,
     StaticAddressArchivedData,
@@ -128,6 +129,8 @@ def test_every_resource_hits_the_documented_route():
         (lambda: api.webhooks.deliveries.retry("d1"), "POST", "/v1/webhooks/deliveries/d1/retry"),
         (lambda: api.embed.get(), "GET", "/v1/embed"),
         (lambda: api.embed.set(["https://shop.example"]), "PUT", "/v1/embed"),
+        (lambda: api.invoices.coin_options("i1"), "GET", "/v1/invoices/i1/coin-options"),
+        (lambda: api.invoices.select_coin("i1", "c"), "POST", "/v1/invoices/i1/coin"),
     ]
     for fn, _, _ in calls:
         fn()
@@ -427,3 +430,84 @@ def test_create_invoice_allowed_coin_ids():
 
     cur = api.currencies.list()
     assert [c.invoice_enabled for c in cur] == [True, False, None]
+
+
+# Your own payment page (host-to-host): the coin options of an invoice without a coin, the choice, the payment block.
+H2H_INVOICE = {
+    "id": "0b6c8f2e-3a1d-4e5f-9a7b-1c2d3e4f5a6b", "status": "new", "currency": "USD", "amount": "49.90",
+    "coin_id": "c-btc", "ticker": "BTC", "network": "bitcoin", "address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+    "payer_amount": "0.00081234", "amount_crypto": "0.00080584", "ttl_expires_at": "2026-10-18T12:30:00Z",
+    "payment_uri": "bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?amount=0.00081234",
+    "qr_payload": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "confirmations": None, "required_confirmations": 2,
+}
+H2H_OPTIONS = {
+    "coin_options": [
+        {"coin_id": "c-usdt", "ticker": "USDT", "name": "Tether USD", "network": "tron", "network_name": "TRON (TRC-20)", "decimals": 6,
+         "confirmations": 19, "estimated_amount": "49.900000", "estimate_reason": None, "estimate_message": None, "rate_as_of": "2026-10-18T12:00:00Z"},
+        {"coin_id": "c-btc", "ticker": "BTC", "name": "Bitcoin", "network": "bitcoin", "network_name": "Bitcoin", "decimals": 8, "confirmations": 2,
+         "estimated_amount": None, "estimate_reason": "rate_stale",
+         "estimate_message": {"key": "checkout.estimate.rate_stale", "default": "Estimate unavailable"}, "rate_as_of": None},
+    ]
+}
+
+
+def test_coin_options_and_select_coin():
+    api, fs, sleeps = make([resp(200, H2H_OPTIONS), resp(200, H2H_INVOICE), resp(200, H2H_INVOICE)])
+    iid = H2H_INVOICE["id"]
+
+    opts = api.invoices.coin_options(iid)
+    assert all(isinstance(o, CoinOption) for o in opts)
+    assert [(o.coin_id, o.estimated_amount, o.estimate_reason) for o in opts] == [("c-usdt", Decimal("49.900000"), None), ("c-btc", None, "rate_stale")]
+    assert opts[0].network_name == "TRON (TRC-20)" and opts[0].confirmations == 19 and opts[1].estimate_message["key"] == "checkout.estimate.rate_stale"
+    r = fs.seen[0]
+    assert (r["method"], r["url"], r["data"]) == ("GET", f"https://api.test/v1/invoices/{iid}/coin-options", None)
+    assert "Idempotency-Key" not in r["headers"]
+
+    inv = api.invoices.select_coin(iid, "c-btc", idempotency_key=f"select-{iid}-c-btc")
+    r = fs.seen[1]
+    assert (r["method"], r["url"], r["data"]) == ("POST", f"https://api.test/v1/invoices/{iid}/coin", b'{"coin_id":"c-btc"}')
+    assert r["headers"]["Idempotency-Key"] == f"select-{iid}-c-btc"
+    assert r["headers"]["X-Signature"] == sign(SECRET, 1758000000, "POST", f"/v1/invoices/{iid}/coin", b'{"coin_id":"c-btc"}')
+    assert isinstance(inv, Invoice) and inv.payer_amount == Decimal("0.00081234")
+    assert inv.payment_uri == H2H_INVOICE["payment_uri"] and inv.qr_payload == "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+    assert inv.confirmations is None and inv.required_confirmations == 2
+
+    api.invoices.select_coin(iid, "c-btc")
+    assert len(fs.seen[2]["headers"]["Idempotency-Key"]) == 36  # auto key when none is given
+    assert sleeps == []
+
+
+def test_invoice_payment_fields_default_to_none_before_the_choice():
+    inv = Invoice.from_dict({"id": "i1", "status": "new", "coin_id": None, "payment_uri": None, "qr_payload": None, "confirmations": None, "required_confirmations": None})
+    assert (inv.payment_uri, inv.qr_payload, inv.confirmations, inv.required_confirmations) == (None, None, None, None)
+    old = Invoice.from_dict({"id": "i1", "status": "new"})  # a response without the fields
+    assert old.payment_uri is None and old.required_confirmations is None
+    seen = Invoice.from_dict({"id": "i1", "status": "pending", "confirmations": 3, "required_confirmations": 20})
+    assert (seen.confirmations, seen.required_confirmations) == (3, 20)
+
+
+def test_select_coin_503_retried_same_key_409_400_not_retried():
+    clock = iter(range(1758000000, 1758000100))
+    api, fs, sleeps = make(
+        [
+            resp(503, {"error": {"code": "unavailable", "message": "rate feed is down"}}),
+            resp(200, H2H_INVOICE),
+            resp(409, {"error": {"code": "conflict", "message": "coin already chosen", "details": {"coin_id": "c-btc"}}}),
+            resp(400, {"error": {"code": "validation_error", "message": "coin is not among the options", "details": {"field": "coin_id"}}}),
+        ],
+        now=lambda: next(clock),
+        retry_base=0.1,
+        retry_max=0.4,
+    )
+    inv = api.invoices.select_coin("i1", "c-btc", idempotency_key="k-1")
+    assert inv.address == H2H_INVOICE["address"] and len(fs.seen) == 2 and len(sleeps) == 1
+    assert [r["headers"]["Idempotency-Key"] for r in fs.seen] == ["k-1", "k-1"]
+    assert [r["data"] for r in fs.seen] == [b'{"coin_id":"c-btc"}'] * 2
+
+    with pytest.raises(ApiError) as e:
+        api.invoices.coin_options("i1")
+    assert e.value.status == 409 and e.value.details["coin_id"] == "c-btc"
+    with pytest.raises(ApiError) as e:
+        api.invoices.select_coin("i1", "c-x")
+    assert e.value.status == 400 and e.value.field == "coin_id"
+    assert len(fs.seen) == 4 and len(sleeps) == 1  # 4xx is not retried
